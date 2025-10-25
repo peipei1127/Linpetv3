@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+  <title>养·嶙（Web v3.3.2 完整版）</title>
+  <meta name="theme-color" content="#0f0f12"/>
+  <link rel="manifest" href="manifest.webmanifest">
+  <style>
+    :root{
+      --bg:#0f0f12;--card:#131722;--ink:#e9edf7;--muted:#9aa4b2;--border:#1f2633;--accent:#8daaFF;
+    }
+    *{box-sizing:border-box}
+    html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial}
+    .wrap{max-width:720px;margin:0 auto;padding:20px;position:relative}
+    .card{background:#131722;border:1px solid #1f2633;border-radius:18px;padding:22px;position:relative;overflow:hidden}
+    .center{text-align:center}
+    .big{font-size:28px;margin:0}
+    .sub{color:#9aa4b2;font-size:14px;margin-top:6px;min-height:22px}
+    .avatarWrap{position:relative;width:190px;height:190px;margin:16px auto 6px}
+    .pulse{position:absolute;inset:0;border-radius:50%;border:1px solid #2b3444;box-shadow:0 0 0 0 rgba(141,170,255,.15);animation:pulse 3s ease-out infinite}
+    @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(141,170,255,.25)}100%{box-shadow:0 0 0 24px rgba(141,170,255,0)}}
+    .avatar{position:absolute;inset:10px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#1a2030;border:1px solid #2b3444;font-size:76px;transition: transform .08s linear}
+    .tag{color:#9aa4b2;font-size:14px;margin:10px 0 6px}
+    .bar{height:10px;background:#222;border-radius:999px;overflow:hidden}
+    .bar>div{height:100%;transition:width .25s cubic-bezier(.2,.8,.2,1);background:linear-gradient(90deg,rgba(255,255,255,.15),rgba(255,255,255,.35))}
+    .grid{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:16px}
+    button{border:none;border-radius:12px;background:#1b1f2a;color:#fff;padding:12px 16px}
+    .pill{display:inline-block;padding:2px 8px;border:1px solid #1f2633;border-radius:999px;font-size:12px;color:#cdd6e3}
+    .toast{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);background:#10131a;color:#fff;border:1px solid #293244;padding:10px 14px;border-radius:10px;font-size:14px;opacity:0;pointer-events:none;transition:opacity .2s ease}
+    .toast.show{opacity:1}
+    .typing{border-right:2px solid var(--accent);white-space:nowrap;overflow:hidden}
+    .dragCookie{margin-top:8px;display:flex;justify-content:center}
+    .cookie{font-size:28px;user-select:none;display:inline-block;touch-action:none}
+    .cookie.dragging{position:fixed;z-index:10;pointer-events:none;transform:translate(-50%,-50%) scale(1.2)}
+  </style>
+</head>
+<body>
+  <div class="wrap" id="stage">
+    <div class="card" id="card">
+      <div id="toast" class="toast"></div>
+      <div class="center">
+        <h1 class="big">「嶙」 · 级别 <span id="lv">1</span></h1>
+        <div class="sub" id="line">加载中…</div>
+        <div style="margin-top:6px"><span class="pill" id="elapsed">—</span></div>
+      </div>
+      <div class="avatarWrap" id="targetZone">
+        <div class="pulse" id="ring"></div>
+        <div class="avatar" id="face" aria-label="avatar">🧊</div>
+      </div>
+      <div class="sub center">（危险、偏执、只宠你）</div>
+
+      <div class="tag">饥饿 <span id="hungerNum">0</span>%</div>
+      <div class="bar"><div id="hungerBar" style="width:0%"></div></div>
+
+      <div class="tag">心情 <span id="moodNum">0</span>%</div>
+      <div class="bar"><div id="moodBar" style="width:0%"></div></div>
+
+      <div class="tag">体力 <span id="energyNum">0</span>%</div>
+      <div class="bar"><div id="energyBar" style="width:0%"></div></div>
+
+      <div class="tag">升级进度 <span id="progLabel">0/120 分钟（暂停）</span></div>
+      <div class="bar"><div id="progBar" style="width:0%"></div></div>
+
+      <div class="grid">
+        <button id="feed">喂食</button>
+        <button id="pet">摸头</button>
+        <button id="train">训练</button>
+        <button id="sleep">小憩</button>
+        <button id="talk">说话</button>
+      </div>
+
+      <div class="dragCookie"><span class="cookie" id="cookie">🍪 拖我喂他</span></div>
+    </div>
+  </div>
+
+  <script>
+    const clamp=(n,min=0,max=100)=>Math.max(min,Math.min(max,n));
+    const KEY='lin_pet_web_v3';
+    let AUDIO_ON=false, AC=null;
+
+    function init(){
+      const raw=localStorage.getItem(KEY);
+      if(raw) return JSON.parse(raw);
+      const s={hunger:20,mood:80,energy:80,level:1,lastUpdate:Date.now(),_goodMinute:0};
+      localStorage.setItem(KEY, JSON.stringify(s)); return s;
+    }
+    function E(id){return document.getElementById(id)}
+    function T(id,txt){E(id).textContent=txt}
+    function B(id,val){E(id).style.width=val+'%'}
+    function faceByState(s){
+      if(s.hunger>=80) return '🥶';
+      if(s.mood<=15) return '😡';
+      if(s.mood<=25) return '😠';
+      if(s.energy<=25) return '🥱';
+      if(s.mood>=92 && s.hunger<=30) return '🥹';
+      if(s.mood>=85 && s.hunger<=30) return '😏';
+      return '🧊';
+    }
+    function typeLine(text){
+      const el=E('line'); el.classList.add('typing');
+      let i=0; el.textContent="";
+      const id=setInterval(()=>{ el.textContent=text.slice(0,++i); if(i>=text.length){ clearInterval(id); el.classList.remove('typing'); } },22);
+    }
+    function entryLine(s){
+      const hour=new Date().getHours();
+      const base=['过来。再近一点。','手给我。','别分心，看我。','坐好。听话。','慢点呼吸。靠着我。','我数到三，你来。','安静一点。让我听你的心跳。'];
+      const night=['把声音放低点。','过来睡，抱着我。','别看屏幕，闭眼。','我在这，一整夜。'];
+      if(hour>=23||hour<6){ if(Math.random()<.5) return night[Math.floor(Math.random()*night.length)]; }
+      return base[Math.floor(Math.random()*base.length)];
+    }
+    function render(s,forced=null){
+      T('lv', s.level||1);
+      typeLine(forced||entryLine(s));
+      T('hungerNum', Math.round(s.hunger)); T('moodNum', Math.round(s.mood)); T('energyNum', Math.round(s.energy));
+      B('hungerBar', s.hunger); B('moodBar', s.mood); B('energyBar', s.energy);
+      T('face', faceByState(s));
+      renderProgress(s);
+    }
+    function renderProgress(s){
+      const good=(s.mood>=80 && s.hunger<=30);
+      const m=Math.floor(s._goodMinute||0);
+      const pct=Math.max(0,Math.min(100,(m/120)*100));
+      E('progBar').style.width=pct+'%';
+      E('progLabel').textContent=m+'/120 分钟'+(good?'（进行中）':'（暂停）');
+    }
+
+    function applyOffline(s){
+      const now=Date.now(); const minutes=Math.floor((now-(s.lastUpdate||now))/60000);
+      E('elapsed').textContent=minutes>0?('离开了 '+minutes+' 分钟'):'刚刚回来';
+      if(minutes>0){
+        s.hunger=clamp(s.hunger+1*minutes); s.mood=clamp(s.mood-0.5*minutes); s.energy=clamp(s.energy-0.5*minutes);
+      }
+      if((s._goodMinute||0)>=120){ s.level=(s.level||1)+1; s._goodMinute=0; }
+      s.lastUpdate=now; localStorage.setItem(KEY, JSON.stringify(s)); return s;
+    }
+
+    function ensureAC(){
+      if(!AUDIO_ON) return null;
+      const C=window.AudioContext||window.webkitAudioContext; if(!C) return null;
+      if(!AC) AC=new C({latencyHint:'interactive'});
+      if(AC.state==='suspended'){ AC.resume().catch(()=>{}); }
+      return AC;
+    }
+    function playBeat(){
+      const ac=ensureAC(); if(!ac) return;
+      const t=ac.currentTime;
+      const mk=(dur=0.24,gain=0.28)=>{
+        const g=ac.createGain(); const o=ac.createOscillator(); o.type='sine'; o.frequency.setValueAtTime(80,t);
+        o.connect(g); g.connect(ac.destination); g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(gain,t+0.02); g.gain.exponentialRampToValueAtTime(0.0008,t+dur);
+        o.start(t); o.stop(t+dur);
+      }; mk(); setTimeout(mk,210);
+    }
+    document.addEventListener('click', ()=>ensureAC(), {passive:true});
+    document.addEventListener('touchstart', ()=>ensureAC(), {passive:true});
+
+    function act(type){
+      let s=JSON.parse(localStorage.getItem(KEY));
+      if(type==='feed'){ s.hunger=clamp(s.hunger-35); s.mood=clamp(s.mood+10); if(AUDIO_ON) playBeat(); }
+      if(type==='pet'){ s.mood=clamp(s.mood+15); if(AUDIO_ON) playBeat(); }
+      if(type==='train'){ s.energy=clamp(s.energy-15); s.mood=clamp(s.mood+5); if(AUDIO_ON) playBeat(); }
+      if(type==='sleep'){ s.energy=clamp(s.energy+35); s.hunger=clamp(s.hunger+10); }
+      if(type==='talk'){ s.mood=clamp(s.mood+8); typeLine(entryLine(s)); if(AUDIO_ON) playBeat(); }
+      s.lastUpdate=Date.now(); localStorage.setItem(KEY, JSON.stringify(s)); render(s);
+    }
+
+    // 拖拽喂食（阻止页面滚动）
+    (function(){
+      const cookie=E('cookie'); let dragging=false;
+      function posMove(e){ const pt=e.touches?e.touches[0]:e; cookie.style.left=pt.clientX+'px'; cookie.style.top=pt.clientY+'px'; }
+      function start(e){ dragging=true; cookie.classList.add('dragging'); posMove(e); e.preventDefault(); }
+      function end(e){
+        if(!dragging) return; dragging=false; cookie.classList.remove('dragging'); cookie.style.left=''; cookie.style.top='';
+        const t=E('targetZone').getBoundingClientRect(); const pt=e.changedTouches?e.changedTouches[0]:e;
+        const x=pt.clientX, y=pt.clientY; if(x>t.left && x<t.right && y>t.top && y<t.bottom){ act('feed'); e.preventDefault(); }
+      }
+      cookie.addEventListener('pointerdown',start);
+      window.addEventListener('pointermove',e=>{ if(dragging){ posMove(e); e.preventDefault(); } },{passive:false});
+      window.addEventListener('pointerup',end);
+      cookie.addEventListener('touchstart',start,{passive:false});
+      window.addEventListener('touchmove',e=>{ if(dragging){ posMove(e); e.preventDefault(); } },{passive:false});
+      window.addEventListener('touchend',end);
+    })();
+
+    // 绑定按钮
+    ['feed','pet','train','sleep','talk'].forEach(id=>E(id).addEventListener('click',()=>act(id)));
+    E('face').addEventListener('click',()=>act('pet'));
+
+    // 定时器：状态衰减 + 升级计时（每10秒推进）
+    function minuteTick(){
+      let s=JSON.parse(localStorage.getItem(KEY));
+      s.hunger=clamp(s.hunger+1); s.mood=clamp(s.mood-0.5); s.energy=clamp(s.energy-0.5);
+      if(s.mood>=80 && s.hunger<=30){ s._goodMinute=(s._goodMinute||0)+(10/60); }
+      if((s._goodMinute||0)>=120){ s.level=(s.level||1)+1; s._goodMinute=0; }
+      s.lastUpdate=Date.now(); localStorage.setItem(KEY, JSON.stringify(s)); render(s);
+      if(AUDIO_ON) playBeat();
+    }
+
+    let s=init(); s=applyOffline(s); render(s);
+    setInterval(minuteTick,10000);
+
+    // 注册 SW（版本参数避免旧缓存）
+    if('serviceWorker' in navigator){
+      window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js?v=332'));
+    }
+  </script>
+</body>
+</html>
